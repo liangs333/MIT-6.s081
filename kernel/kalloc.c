@@ -22,12 +22,13 @@ struct {
   struct spinlock lock;
   struct run *freelist;
 } kmem;
-
+int freeMem = 0;
 void
 kinit()
 {
   initlock(&kmem.lock, "kmem");
   freerange(end, (void*)PHYSTOP);
+//  printf("freeMem changed , + %d  , from kalloc.c \n", PHYSTOP);
 }
 
 void
@@ -52,6 +53,8 @@ kfree(void *pa)
     panic("kfree");
 
   // Fill with junk to catch dangling refs.
+  freeMem += PGSIZE;
+//  printf("freeMem changed , + %d  , from kalloc.c \n", PGSIZE);
   memset(pa, 1, PGSIZE);
 
   r = (struct run*)pa;
@@ -76,7 +79,14 @@ kalloc(void)
     kmem.freelist = r->next;
   release(&kmem.lock);
 
-  if(r)
+  if(r) { 
     memset((char*)r, 5, PGSIZE); // fill with junk
+//    printf("freeMem changed , - %d  , from kalloc.c", PGSIZE);
+    freeMem -= PGSIZE;
+  } 
   return (void*)r;
 }
+
+uint64 getFreeMem() { 
+  return freeMem;
+} 

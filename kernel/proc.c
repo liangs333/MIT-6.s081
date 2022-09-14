@@ -292,6 +292,9 @@ fork(void)
   // copy saved user registers.
   *(np->trapframe) = *(p->trapframe);
 
+  //copy the traceMark
+  np->traceMark = p->traceMark;
+
   // Cause fork to return 0 in the child.
   np->trapframe->a0 = 0;
 
@@ -653,4 +656,19 @@ procdump(void)
     printf("%d %s %s", p->pid, state, p->name);
     printf("\n");
   }
+}
+
+
+uint64 getProcCount() {
+  uint64 procCount = 0;
+  struct proc *p;
+  for(p = proc; p < &proc[NPROC]; p++) {
+//   acquire(&p->lock);
+   if(p->state != UNUSED) {
+    procCount++;
+//    printf("proc id = %d      %d     , from proc.c\n", p->pid, procCount);
+   }
+//   release(&p->lock);
+  }
+  return procCount;
 }

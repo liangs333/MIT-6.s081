@@ -105,4 +105,7 @@ struct proc {
   struct file *ofile[NOFILE];  // Open files
   struct inode *cwd;           // Current directory
   char name[16];               // Process name (debugging)
+
+  //还不是很懂lock是什么，就先扔这儿吧qwq
+  uint64 traceMark;
 };
