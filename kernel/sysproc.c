@@ -75,15 +75,48 @@ sys_sleep(void)
   return 0;
 }
 
-
-#ifdef LAB_PGTBL
+//#ifdef LAB_PGTBL
 int
 sys_pgaccess(void)
 {
   // lab pgtbl: your code here.
+  uint64 userAddressStart, outputAddress;
+  int numberToCheck;
+  //get the args;
+  if(argaddr(0, &userAddressStart) < 0)
+    return -1;
+  if(argint(1, &numberToCheck) < 0)
+    return -1;
+  if(argaddr(2, &outputAddress) < 0)
+    return -1;
+  
+  //set a limit
+  if(numberToCheck > 64)
+    return -1;
+  
+  uint64 bitmask = 0;
+  struct proc *p = myproc();
+  int i = 0;
+  for(uint64 userAddressNow = userAddressStart; userAddressNow < userAddressStart + PGSIZE * numberToCheck; userAddressNow += PGSIZE) {
+    if(userAddressNow > MAXVA)
+      return -1;
+    pte_t *pte = walk(p -> pagetable, userAddressNow, 0);
+    if(pte == 0)
+      return -1;
+    if(!(*pte & PTE_V)) 
+      break;
+    if(*pte & PTE_A) { 
+      bitmask |= (1 << i);
+      (*pte)  ^= PTE_A;
+    } 
+    ++i;
+    printf("bitmask %p \n", bitmask);
+  }
+  copyout(p -> pagetable, outputAddress, (char *)&bitmask, sizeof(bitmask));
+
   return 0;
 }
-#endif
+//#endif
 
 uint64
 sys_kill(void)

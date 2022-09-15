@@ -29,7 +29,7 @@ void
 ugetpid_test()
 {
   int i;
-
+  write(2, "123123123", sizeof("123123123"));
   printf("ugetpid_test starting\n");
   testname = "ugetpid_test";
 
