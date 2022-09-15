@@ -281,6 +281,36 @@ freewalk(pagetable_t pagetable)
   kfree((void*)pagetable);
 }
 
+void aVmprint(pagetable_t pagetable, int layer) { 
+  if(layer == 0) {
+    printf("page table %p\n", pagetable);
+  }
+  for(int i = 0; i < 512; ++i) {
+    pte_t pte = pagetable[i];
+    if((pte & PTE_V)) {
+        uint64 child = PTE2PA(pte);
+        
+        if(layer == 0) {
+          printf("..");
+        }
+        else if(layer == 1) {
+          printf(".. ..");
+        }
+        else if(layer == 2) {
+          printf(".. .. ..");
+        }
+        printf("%d: pte %p pa %p\n", i, pte, child);
+
+        if(layer < 2)
+          aVmprint((pagetable_t)child, layer + 1);
+    }
+  }
+} 
+
+void vmprint(pagetable_t pagetable) {
+  aVmprint(pagetable, 0);
+}
+
 // Free user memory pages,
 // then free page-table pages.
 void
