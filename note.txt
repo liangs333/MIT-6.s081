@@ -1,0 +1,38 @@
+从这次之后开始做做笔记得了。
+今天的课程主要是讲了，发生syscall的时候，OS如何从userspace切换到kernal的，这里理一下思路吧（希望写的是对的
+
+先调用ecall，该指令为硬件指令，主要负责三件事儿
+    把CPU设置为kernalMode
+    把PC存进sepc里
+    把PC设置为stvec里的值
+这里提一嘴，在用户态中时，stvec里的值是指向trampoline.S里，uservec的地址，而这句话产生了两个问题
+    这uservec为啥会在该用户进程的VM里————内核初始化proc的时候，会把trampoline塞进去，还有一个trapframe也会塞进去，后面会说到。
+    stvec里为啥会有值————也是内核干的，具体位置我们放在后面说
+
+再运行trampoline中的uservec，注意此时不能操作任何寄存器，否则会造成原先进程的数据丢失，主要负责以下事项
+    先把a0和sscrach寄存器互换，这样子我们保存了a0的信息，可以用a0搞事情了，而此时a0里存储的东西，是trapframe的地址。
+    保存一大车原寄存器到trapframe中，从trapframe里拿一大车kernal要用到的指针之类的
+    进行pagetable切换，由于trampoline代码巧妙的映射，切换pagetable之后，当前PC仍然没指向奇怪的地方
+    跳转到usertrap
+
+usertrap执行syscall或者中断处理，调用usertrapret
+    因为进入了kernal，所以stvec应该指向其他地方，这里做了此事。
+    其中，如果是syscall，则将p->trapframe->epc加上4，表示恢复后，pc会跳转到我们期望的，syscall后面的那条指令，这个即本次实验的精髓
+    然后usertrap调用usertrapret
+
+usertrapret
+    恢复tramframe里各种内核信息，应该是为了防止在此次syscall期间发生了奇怪的事情，导致trapframe里的信息歪了（？
+    并且恢复stvec
+    跳转到trampoline里的userret
+
+userret
+    恢复寄存器、页表、栈指针等一系列玩意儿，然后就能跑原程序了
+
+实验就是加俩syscall，第一个叫递归打印，主要是看一眼栈的结构就行，不太难
+第二个是alarm，由于alarm需要执行的指令在用户空间，需要在用户pagetable才能用。
+因此需要理解上述“p->trapframe->epc加上4”的含义，然后就知道，这玩意指向我们userret之后想去的地方，于是就知道，把这东西指向alarmHandle就可以了。
+不过显然，alarmHandle执行完之后，我们希望跳转到原先的pc+4的地方，且，alarmHandle对应的函数，不出意外会操作到寄存器全家桶
+因此我们需要另一个长的很像trapframe的东西，来保存我们跳转到alarmHandle之前的寄存器状态，然后在出alarmHandle的时候还原即可。
+实验用时四个来小时？主要是在调传参和思考怎么做trapframe的还原。
+
+
