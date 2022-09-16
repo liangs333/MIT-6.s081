@@ -1,8 +1,8 @@
 从这次之后开始做做笔记得了。
-今天的课程主要是讲了，发生syscall的时候，OS如何从userspace切换到kernal的，这里理一下思路吧（希望写的是对的
+今天的课程主要是讲了，发生syscall的时候，OS如何从userspace切换到kernel的，这里理一下思路吧（希望写的是对的
 
 先调用ecall，该指令为硬件指令，主要负责三件事儿
-    把CPU设置为kernalMode
+    把CPU设置为kernelMode
     把PC存进sepc里
     把PC设置为stvec里的值
 这里提一嘴，在用户态中时，stvec里的值是指向trampoline.S里，uservec的地址，而这句话产生了两个问题
@@ -11,12 +11,12 @@
 
 再运行trampoline中的uservec，注意此时不能操作任何寄存器，否则会造成原先进程的数据丢失，主要负责以下事项
     先把a0和sscrach寄存器互换，这样子我们保存了a0的信息，可以用a0搞事情了，而此时a0里存储的东西，是trapframe的地址。
-    保存一大车原寄存器到trapframe中，从trapframe里拿一大车kernal要用到的指针之类的
+    保存一大车原寄存器到trapframe中，从trapframe里拿一大车kernel要用到的指针之类的
     进行pagetable切换，由于trampoline代码巧妙的映射，切换pagetable之后，当前PC仍然没指向奇怪的地方
     跳转到usertrap
 
 usertrap执行syscall或者中断处理，调用usertrapret
-    因为进入了kernal，所以stvec应该指向其他地方，这里做了此事。
+    因为进入了kernel，所以stvec应该指向其他地方，这里做了此事。
     其中，如果是syscall，则将p->trapframe->epc加上4，表示恢复后，pc会跳转到我们期望的，syscall后面的那条指令，这个即本次实验的精髓
     然后usertrap调用usertrapret
 
