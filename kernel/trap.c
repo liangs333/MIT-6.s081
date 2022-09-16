@@ -66,7 +66,19 @@ usertrap(void)
 
     syscall();
   } else if((which_dev = devintr()) != 0){
-    // ok
+    if(which_dev == 2 && p->alarmActivated == 1) {
+      p->tickPassed += 1;
+      if(p->tickPassed == p->alarmInterval) {
+        if(p->doingAlarmNow == 0) {
+          memmove(p->originalTrapframe, p->trapframe, PGSIZE);
+          //回到userMode后，是从trapframe->epc取pc，所以把目标指令扔这
+          p->trapframe->epc = p->alarmHandler;  
+          p->doingAlarmNow = 1;
+        }
+        p->tickPassed = 0;
+      }
+    }
+
   } else {
     printf("usertrap(): unexpected scause %p pid=%d\n", r_scause(), p->pid);
     printf("            sepc=%p stval=%p\n", r_sepc(), r_stval());

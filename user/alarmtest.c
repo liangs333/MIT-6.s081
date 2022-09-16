@@ -29,6 +29,14 @@ main(int argc, char *argv[])
 
 volatile static int count;
 
+// void
+// periodic()
+// {
+//   count = count + 1;
+//   printf("alarm!\n");
+//   sigreturn();
+// }
+
 void
 periodic()
 {
@@ -61,10 +69,14 @@ test0()
 }
 
 void __attribute__ ((noinline)) foo(int i, int *j) {
+  // if(*j % 100000 == 0)
+  //   printf("j = %d\n", *j);
+  
   if((i % 2500000) == 0) {
     write(2, ".", 1);
   }
-  *j += 1;
+    *j += 1;
+
 }
 
 //
@@ -86,20 +98,26 @@ test1()
   j = 0;
   sigalarm(2, periodic);
   for(i = 0; i < 500000000; i++){
-    if(count >= 10)
+    if(count >= 10) { 
+      printf("i = %d\n", i);
       break;
+    } 
     foo(i, &j);
+    if(j % 1000000 == 0) {
+      printf("j = %d\n", j);
+    }
   }
   if(count < 10){
     printf("\ntest1 failed: too few calls to the handler\n");
   } else if(i != j){
     // the loop should have called foo() i times, and foo() should
-    // have incremented j once per call, so j should equal i.
+    // have incremented j once per call,so j should equal i.
     // once possible source of errors is that the handler may
     // return somewhere other than where the timer interrupt
     // occurred; another is that that registers may not be
     // restored correctly, causing i or j or the address ofj
     // to get an incorrect value.
+    printf("%d %d\n", i, j);
     printf("\ntest1 failed: foo() executed fewer times than it was called\n");
   } else {
     printf("test1 passed\n");
