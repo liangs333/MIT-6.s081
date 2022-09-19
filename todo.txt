@@ -1,0 +1,6 @@
+搞搞fork函数里面调用的uvmcopy，清除PTE_W
+改usertrap，遇到复制
+改kfree（好像这个有点复杂）
+COPYOUT
+
+

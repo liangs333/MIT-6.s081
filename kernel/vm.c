@@ -82,7 +82,6 @@ walk(pagetable_t pagetable, uint64 va, int alloc)
 {
   if(va >= MAXVA)
     panic("walk");
-
   for(int level = 2; level > 0; level--) {
     pte_t *pte = &pagetable[PX(level, va)];
     if(*pte & PTE_V) {
@@ -266,6 +265,7 @@ uvmdealloc(pagetable_t pagetable, uint64 oldsz, uint64 newsz)
 void
 freewalk(pagetable_t pagetable)
 {
+//  printf("EnterFreeWalk\n");
   // there are 2^9 = 512 PTEs in a page table.
   for(int i = 0; i < 512; i++){
     pte_t pte = pagetable[i];
@@ -279,6 +279,7 @@ freewalk(pagetable_t pagetable)
     }
   }
   kfree((void*)pagetable);
+//  printf("check PUC after freewalk %d", getPageUseCount((uint64)pagetable / PGSIZE));
 }
 
 // Free user memory pages,
@@ -303,8 +304,7 @@ uvmcopy(pagetable_t old, pagetable_t new, uint64 sz)
   pte_t *pte;
   uint64 pa, i;
   uint flags;
-  char *mem;
-
+//  printf("Enter UVMCOPY\n");
   for(i = 0; i < sz; i += PGSIZE){
     if((pte = walk(old, i, 0)) == 0)
       panic("uvmcopy: pte should exist");
@@ -312,12 +312,28 @@ uvmcopy(pagetable_t old, pagetable_t new, uint64 sz)
       panic("uvmcopy: page not present");
     pa = PTE2PA(*pte);
     flags = PTE_FLAGS(*pte);
-    if((mem = kalloc()) == 0)
+    if(getPageUseCount(pa / PGSIZE) == 0) {
+
+      panic("Fault from uvmCOPY");
+    }
+    //disable Write and mark as COW page
+//    printf("PTE from uvmcopy %p\n", pte);
+    if(flags & PTE_W) { 
+      *pte &= ~(PTE_W);
+      *pte |= (PTE_C);
+    } 
+    flags = PTE_FLAGS(*pte);
+
+    if(mappages(new, i, PGSIZE, (uint64)pa, flags) != 0){
       goto err;
-    memmove(mem, (char*)pa, PGSIZE);
-    if(mappages(new, i, PGSIZE, (uint64)mem, flags) != 0){
-      kfree(mem);
-      goto err;
+    }
+    increasePageUseCount(pa / PGSIZE);
+//    printf("PUC after copy from uvmCOPY %p %d\n", pa, getPageUseCount(pa / PGSIZE));
+//    printf("PTES after uvmcopy\n%p\n%p\n", walk(old, i, 0), walk(new, i, 0));
+    pte_t *np = walk(new, i, 0);
+    pte_t *op = walk(old, i, 0);
+    if(PTE2PA(*np) != PTE2PA(*op) || PTE_FLAGS(*np) != PTE_FLAGS(*op)) {
+      panic("GG in uvmcopy");
     }
   }
   return 0;
@@ -350,6 +366,17 @@ copyout(pagetable_t pagetable, uint64 dstva, char *src, uint64 len)
 
   while(len > 0){
     va0 = PGROUNDDOWN(dstva);
+    if(va0 >= MAXVA)
+      return -1;
+//    printf("Do checkCOW from copyout\n");
+    if(checkCOW(pagetable, va0) == 0) {
+      if(solveCOW(pagetable, va0) == 0) {
+        //ok
+      }
+      else {
+        return -1;
+      }
+    } 
     pa0 = walkaddr(pagetable, va0);
     if(pa0 == 0)
       return -1;
@@ -372,7 +399,7 @@ int
 copyin(pagetable_t pagetable, char *dst, uint64 srcva, uint64 len)
 {
   uint64 n, va0, pa0;
-
+//  printf("Enter Copyin\n");
   while(len > 0){
     va0 = PGROUNDDOWN(srcva);
     pa0 = walkaddr(pagetable, va0);
@@ -387,6 +414,7 @@ copyin(pagetable_t pagetable, char *dst, uint64 srcva, uint64 len)
     dst += n;
     srcva = va0 + PGSIZE;
   }
+//  printf("Exit Copyin, still alive\n");
   return 0;
 }
 
@@ -432,3 +460,48 @@ copyinstr(pagetable_t pagetable, char *dst, uint64 srcva, uint64 max)
     return -1;
   }
 }
+
+int checkCOW(pagetable_t pagetable, uint64 va) {
+//  printf("Entering checkCow\n");
+  if(va >= MAXVA) //如果丢进walk会panic
+    return -1;
+  pte_t *pte = walk(pagetable, va, 0);
+  if(pte == 0)
+    return -1;
+  //user权限，能用，且是cow页面
+
+  if(!((*pte & PTE_V) && ((*pte & PTE_C)) && (*pte & PTE_U)))
+    return -1;
+
+//  printf("from checkCOW %p\n", *pte);
+//  printf("%d %d %d\n", (*pte & PTE_V), (~(*pte & PTE_C)), (*pte & PTE_U));
+  return 0;
+}
+
+int solveCOW(pagetable_t pagetable, uint64 va) { 
+  if(va >= MAXVA)
+    return -1;
+  pte_t *pte = walk(pagetable, va, 0);
+  uint64 pa = PTE2PA(*pte);
+//  printf("get PA from solveCOW %p %d\n", pa, getPageUseCount(pa / PGSIZE));
+  uint64 flags = PTE_FLAGS(*pte);
+  if(pa == 0)
+    return -1;
+  char *mem = kalloc();
+  if(mem == 0) { 
+//    printf("kalloc failed in solveCOW\n");
+    return -1;
+  } 
+  
+  memmove(mem, (char *)pa, PGSIZE);
+  uint64 nowflags = flags | (PTE_W);
+  nowflags &= ~(PTE_C);
+  *pte = PA2PTE(mem) | nowflags;
+//  printf("before Kfree from solveCOW %p %d\n", pa, getPageUseCount(pa / PGSIZE));
+  kfree((void*)pa);
+//  printf("after Kfree from solveCOW %p %d\n", pa, getPageUseCount(pa / PGSIZE));
+//  printf("about mem from solveCOW %p %d\n", mem, getPageUseCount((uint64)mem / PGSIZE));
+//  printf("after kfree from solveCOW , PUC = %d\n", getPageUseCount(pa / PGSIZE));
+//  printf("solveSuccess\n");
+  return 0;
+} 

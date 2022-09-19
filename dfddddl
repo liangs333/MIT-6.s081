@@ -1,0 +1,19 @@
+  pgtbl[m
+  syscall[m
+* [32mtraps[m
+  util[m
+  [31mremotes/origin/HEAD[m -> origin/util
+  [31mremotes/origin/cow[m
+  [31mremotes/origin/fs[m
+  [31mremotes/origin/lock[m
+  [31mremotes/origin/mmap[m
+  [31mremotes/origin/mypgtbl[m
+  [31mremotes/origin/mysyscall[m
+  [31mremotes/origin/myutil[m
+  [31mremotes/origin/net[m
+  [31mremotes/origin/pgtbl[m
+  [31mremotes/origin/riscv[m
+  [31mremotes/origin/syscall[m
+  [31mremotes/origin/thread[m
+  [31mremotes/origin/traps[m
+  [31mremotes/origin/util[m

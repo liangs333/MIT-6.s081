@@ -26,17 +26,20 @@ char buf[BUFSZ];
 void
 copyin(char *s)
 {
+//  printf("Enter Copyin\n");
   uint64 addrs[] = { 0x80000000LL, 0xffffffffffffffff };
 
   for(int ai = 0; ai < 2; ai++){
     uint64 addr = addrs[ai];
     
     int fd = open("copyin1", O_CREATE|O_WRONLY);
+    printf("open aive\n");
     if(fd < 0){
       printf("open(copyin1) failed\n");
       exit(1);
     }
     int n = write(fd, (void*)addr, 8192);
+//    printf("1aive\n");
     if(n >= 0){
       printf("write(fd, %p, 8192) returned %d, not -1\n", addr, n);
       exit(1);
@@ -45,6 +48,7 @@ copyin(char *s)
     unlink("copyin1");
     
     n = write(1, (char*)addr, 8192);
+//    printf("1aive\n");
     if(n > 0){
       printf("write(1, %p, 8192) returned %d, not -1 or 0\n", addr, n);
       exit(1);
@@ -54,8 +58,10 @@ copyin(char *s)
     if(pipe(fds) < 0){
       printf("pipe() failed\n");
       exit(1);
-    }
+    }    
     n = write(fds[1], (char*)addr, 8192);
+//    printf("1aive\n");
+
     if(n > 0){
       printf("write(pipe, %p, 8192) returned %d, not -1 or 0\n", addr, n);
       exit(1);
