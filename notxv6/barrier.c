@@ -6,6 +6,8 @@
 
 static int nthread = 1;
 static int round = 0;
+pthread_mutex_t lock;
+pthread_cond_t cond;
 
 struct barrier {
   pthread_mutex_t barrier_mutex;
@@ -31,6 +33,21 @@ barrier()
   // then increment bstate.round.
   //
   
+  pthread_mutex_lock(&lock);
+  bstate.nthread++;
+  if(bstate.nthread != nthread) {
+//    printf("Waiting for cond\n");
+    pthread_cond_wait(&cond, &lock);
+  }
+
+  if(bstate.nthread == nthread) {
+ //   printf("Round ++ %d\n", bstate.round);
+    bstate.round++;
+    bstate.nthread = 0;
+    pthread_cond_broadcast(&cond);
+  }
+  pthread_mutex_unlock(&lock);
+
 }
 
 static void *
@@ -57,7 +74,8 @@ main(int argc, char *argv[])
   void *value;
   long i;
   double t1, t0;
-
+  pthread_mutex_init(&lock, NULL);
+  pthread_cond_init(&cond, NULL);
   if (argc < 2) {
     fprintf(stderr, "%s: %s nthread\n", argv[0], argv[0]);
     exit(-1);

@@ -444,9 +444,9 @@ scheduler(void)
   for(;;){
     // Avoid deadlock by ensuring that devices can interrupt.
     intr_on();
-
     for(p = proc; p < &proc[NPROC]; p++) {
       acquire(&p->lock);
+
       if(p->state == RUNNABLE) {
         // Switch to chosen process.  It is the process's job
         // to release its lock and then reacquire it
@@ -476,7 +476,8 @@ sched(void)
 {
   int intena;
   struct proc *p = myproc();
-
+  //此处的lock应当是在该cpu对应的scheduler里被acquire的到的？
+  //呸，是在调用sched的yield里被acquire到的，然后会在scheduler里被释放
   if(!holding(&p->lock))
     panic("sched p->lock");
   if(mycpu()->noff != 1)
@@ -500,6 +501,9 @@ yield(void)
   p->state = RUNNABLE;
   sched();
   release(&p->lock);
+
+  //该lock并非在下面release，而是在scheduler里
+  //同理，release的并不是上面acquire到的，而是scheduler里的
 }
 
 // A fork child's very first scheduling by scheduler()

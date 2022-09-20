@@ -11,9 +11,30 @@
 #define MAX_THREAD  4
 
 
+struct context {
+  uint64 ra;
+  uint64 sp;
+
+  // callee-saved
+  uint64 s0;
+  uint64 s1;
+  uint64 s2;
+  uint64 s3;
+  uint64 s4;
+  uint64 s5;
+  uint64 s6;
+  uint64 s7;
+  uint64 s8;
+  uint64 s9;
+  uint64 s10;
+  uint64 s11;
+};
+// 也是贴的proc里的context
+
 struct thread {
   char       stack[STACK_SIZE]; /* the thread's stack */
   int        state;             /* FREE, RUNNING, RUNNABLE */
+  struct context context;
 };
 struct thread all_thread[MAX_THREAD];
 struct thread *current_thread;
@@ -29,6 +50,7 @@ thread_init(void)
   // a RUNNABLE thread.
   current_thread = &all_thread[0];
   current_thread->state = RUNNING;
+  //设置current_thread 为0号，即Thread Scheduler？
 }
 
 void 
@@ -62,6 +84,8 @@ thread_schedule(void)
      * Invoke thread_switch to switch from t to next_thread:
      * thread_switch(??, ??);
      */
+    //thread_switch(scheduler所在proc -> context, next_thread -> context)
+    thread_switch((uint64)&(t -> context), (uint64)&(next_thread -> context));
   } else
     next_thread = 0;
 }
@@ -75,6 +99,11 @@ thread_create(void (*func)())
     if (t->state == FREE) break;
   }
   t->state = RUNNABLE;
+  //应该是要处理一下t->context，让下次进这个东西的时候能够跑到对应的位子去。
+  //重点应该是sp和ra
+  t -> context.ra = (uint64)func;
+  t -> context.sp = (uint64)&(t -> stack[STACK_SIZE - 1]);
+
   // YOUR CODE HERE
 }
 
