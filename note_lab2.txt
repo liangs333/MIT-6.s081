@@ -1,0 +1,61 @@
+很佩服自己能在没学trap的前提下，做出来这个lab。
+
+该lab的核心是，搞懂当一个userProc调用一个syscall时，发生了什么。
+
+对于userProgram来讲，syscall是一系列在user.h里声明的函数，调用，就会有结果，期间发生了什么，对应程序一概不知道
+很神奇吗 是的很神奇
+
+而对于kernel来讲，事情就要复杂上许多了。
+    一个运行在userSpace的proc调用了一个syscallFunction，实质上是执行了一个跳板函数，这个跳板函数定义在user.h里，实质上是usys.pl里的东西弄出来的汇编。
+    该跳板函数负责把对应的syscall的id放在a7寄存器，然后调用ECALL，剩下发生了什么，这个userProc就不知道了。
+    (至于参数是怎么进去的，ECALL干了什么，这又是另一个美丽的故事了，我们放在Trap那一章细说。)
+    ECALL负责从userSpace进入kernalSpace里的syscall处理函数，syscall处理函数根据a7里的值来判断这个syscall是什么玩意儿，然后交给对应的sys_doSomeThing函数来完成。
+    sys_doSomeThing函数会从寄存器里读取出参数（argint/argaddr等指令），而后根据指令干相应的活儿，最后会把返回值放在一个神奇的地方。
+    然后通过神秘的机制回到userSpace的proc，进行接下来的工作。
+这就是整个syscall的过程。
+
+然后该聊这个实验是怎么写的了，先来看看需求。
+
+task1
+    实现一个sys_trace(int)，该系统调用用于启动对于一个线程及其所有儿子的syscall的追踪。
+    调用时传入一个int作为bitmask，跟踪报道所有(id & bitmask) != 0的syscall的执行情况，并打印返回值。
+
+task1_sol
+    先不管怎么实现对应功能，我们先看看需要做什么，才能使得userSpace里的proc能够合法地调用这个啥都不干的syscall
+        要有跳板函数————usys.pl -> usys.S
+        要让userProc认识这个跳板函数————user.h
+        要有对应的syscall id能放进a7————syscall.c里某个字符串数组
+        要有对应该syscall的sys_doSomeThing————我们需要实现的核心函数
+        要让syscall()能找到sys_doSomeThing————syscall.c里某个函数指针数组
+    思路清晰，挨个添加。
+    这里不得不承认，当时完全不知道sys_trace()应该放在哪儿，也不是很知道sys_trace()里面怎么获得参数，还不是很清楚sys_trace()怎么返回，用了百度，立正挨打。
+
+    理清思绪之后，我们来考虑如何实现该功能。
+    既然是针对一个特定的proc，那么我们势必要在struct proc里面加点什么东西。
+    很自然的想到 搞个traceMark。现在想想或许起名traceMask会更好，毕竟是bitMask。
+    然后在syacall()函数里，根据syscall id和traceMark的关系进行一个判和输出；在sys_trace()里，修改对应进程的traceMark
+    至于如何影响到fork()之后的children，简单在fork()里加一行，让儿子继承traceMark就好。
+
+task2
+    实现一个sys_sysinfo()，该系统调用会返回一个结构体，里面是俩（HIT版本是三个）信息，分别是非空闲proc数、空余内存数、（空余文件描述符数）
+    调用时传入一个结构体指针。
+
+task2_sol
+    如何实装一个syscall不再赘述。
+    难点有二————如何获取信息 以及 如何把对应信息搞回userSpace。
+    关于如何获取信息：
+        非空闲proc数好办，在proc.c里搞个Count数一数就行。
+        freeMem咋办？用了OI味儿很重的办法————在kalloc.c里加了个int用于统计，然后每次kfree或者kalloc的时候对该int进行修改。
+        现在想想，好像可以写一个数freelist里的list数的函数，好像更优雅，但是跑的会更慢。
+    关于如何返回：
+        copyout(pagetable, dstva, *src, len)
+        第一次接触myproc()应该就是这里。当时还不是很懂va是什么东西。
+        只要不把传参传歪来，问题就不大。
+
+做完实验之后大概知道了C语言里的.h是干啥用的了
+并且对于syscall的执行有了个大概的理解
+但是还是不知道ECALL具体做了啥，好像一个ECALL下去，就莫名到了kernelProc的syscall()
+大概就是这样。
+
+
+

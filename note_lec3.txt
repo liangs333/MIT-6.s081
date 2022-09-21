@@ -1,0 +1,12 @@
+第一次接触到userSpace、kernelSpace的切换应该是在这里。
+Frans的引入是通过操作系统的隔离性，即 我们通过怎么样的手段来实现强隔离，进而避免一个userProgram乱搞另外一个？
+XV6给出的答案是 userMode/kernelMode以及虚拟内存机制。
+在userMode的时候，只能执行user级别的指令，而kernelMode能干一些其他的事情。
+这两个mode是通过CPU里某个寄存器的一个bit来决定的，而执行修改这个bit显然的指令显然需要kernelMode
+userProgram在userMode下运行，而当该程序需要干一些操作时，他会通过某种手段像内核提交这个申请，然后转移到内核
+而内核是在kernelMode下运行，内核进行会判断，该用户程序能否做这个事儿，以及做出对应的响应。
+（当然，在后续的学习中，我们会认识到，该手段叫trap）
+
+被隔离的对象本身叫proc，即进程。每个proc都有自己的stack、heap、pagetable，这三样，再后续的note里面我们再聊。
+
+最后讲了当我们开始第一个proc时，机器实际上干了些什么，这里不做赘述。
