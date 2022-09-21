@@ -1,0 +1,46 @@
+做的是21年的pgtbl。
+听说20年的非常可怕，然后没做，但我校OS实验5是20年的pgtbl
+躲不掉.jpg
+还是看看眼前的21年lab吧。
+
+task1 加速系统调用
+    在proc里某个钦定好了的VA映射到一个只读的page，里面存放一个struct，struct里放pid，用于被ugetpid()访问
+
+task1_sol
+    在proc.h里的struct proc中，加一个指向usyscallPage的指针
+    kalloc一页空间，把这个指针指过去，然后把PA里那地方存上对应数据。
+    注意现在对于kernel proc来讲，这个映射已经搞定了，但是对于被创建的userProc，他的pagetable里，是没这个玩意儿的。
+    所以我们要把这个page，在初始化pagetable的时候，放进userProc的pagetable。
+    贴一贴 改一改就好，注意做异常处理。
+
+task2 打印pageTable
+    实现一个函数，传入pagetable_t，即树根，按照某种格式打印整个pageTable
+
+task2_sol
+    根据hint，看看freewalk函数，这个函数就是教你如何大力dfs整棵树的。
+    然后，大力dfs整棵树（
+    该输出什么就输出什么即可，蛮简单的。
+
+task3 页表访问检测
+    实现一个系统调用pgaccess(vaStart，limit, vaStore)
+    该系统调用会检测从vaStart开始的，共limit个page的访问情况，注意不一定真有这些个page。
+    收集上述信息，打包成一个bitMask，然后存进vaStore里
+
+task3_sol
+    注册一个系统调用的诸多步骤略去，见上一个lab的note。
+    可以手动把limit限制为64，反正回传一个bitMask，超过64直接报错就好
+    问题来了，我咋知道这个page有没有被访问过？
+    通过查阅手册，发觉PTE的flags里有一个叫PTE_A的bit，就是用来干这个活儿的，是(1 << 6)，好好打括号（
+    那么思路就很明朗了，通过walk函数找到对应的PTE（如果有的话），check一下PTE_A这个bit有没有东西，如果有，随手清了，然后在bitMask里写一位
+    信息形成一个bitMask之后的return步骤，参考上一个lab的copyout就好了。
+
+做完之后的收获是————没有太大收获。
+emm唯一的收获应该是要好好判边界
+    当你拿到一个VA的时候，他是不是真的在VAMAX下面？
+    你的walk是不是真的有get到PTE？
+    你get到的PTE合法吗？是不是上次unmap后剩下的？
+    总之就是一大车猛判，不然分分钟出panic
+
+写完之后也并没有太清醒，果然21年的lab强度不是很够
+当然，现在写note的时候已经橄榄了20年的lazy和21年的cow，现在倒是对于pageTable有一个较为清醒的认识了（希望我真的有
+最后希望自己下次写20年pgtbl的时候不要被橄榄吧。

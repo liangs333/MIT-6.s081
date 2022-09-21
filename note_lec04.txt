@@ -1,0 +1,60 @@
+重量级的pageTable来了。
+XV6给每个proc提供自己的addressSpace，进而实现proc间的内存隔离，而addressSpace与pageTable是对应的。
+这个隔离是由一个叫MMU的硬件决定的————当CPU希望访问内存，他必须给通过这个硬件，且必须给这个硬件提供虚拟地址和satp中的信息。至于satp是什么，后面再聊。
+对于每个proc均是如此，无论是对于kernelMode下或者是userMode下的proc，都无法绕开MMU访问physicalMemory
+MMU完成了一个从virtualAddress到physicalAddress的工作，而这样的映射往往是一一对应的，但也不全是，在以后的note里面我们会聊到这一点。
+为了防止pageTable自身占用过大的内存空间，我们把它设计成一个512叉、最大深度为4的树形结构，显然使用动态开点技巧。
+BTW，关于如何存储pageTable这件事，可以考虑正常树形结构的存储————只需要存root就好
+这里XV6的策略是，把pageTable根节点扔进一个叫satp的寄存器
+
+这里解释page的概念————一个在PM中连续的4096byte的内存块，而pageTable就是用来告诉我们，VM中某个地址所在的page的起始地址即VA，在PM中的对应了个啥。
+而pageTable中装的东西是什么呢？深度为123的节点里装的是下一层节点的地址和flags，而叶子结点里装的是对应PM的地址和flags。
+
+而后，我们来看如何通过VA和一个pageTable来找到PA。
+    由于我们并不想一次访问一整个page，我们显然需要拿VA里面的一部分bit作为offset。
+    4096 = 2 ^ 12, 因此我们需要VA里的12个bit来做offset，在xv6中，VA的后12个bit被拿来干这个事儿。
+    而在剩下的52个bit里，xv6选择使用较低的27位来放置index，较高的25个bit空置。
+
+    pageTable里真正有效的信息存储在叶子结点，问题就变成了，如何通过VA和root找到对应的叶子。
+    注意pageTable里任意一个结点实质上都是内存里一个完整的page，而某种意义上，他没有实际的叶子，只有指向叶子的指针
+    进行一些简单的数学———— 4096 byte / (8byte per uint64) = 512 uint64
+    因此pageTable是512叉的，而512 = 2 ^ 9, 3 * 9 = 27。
+    这也就是为什么我们的index有27个bit，也就揭示了从index对于找叶子的作用————
+    在root时，利用index的头九个bit，找到root对应page的第对应条目，提取其中的PM，跳过去，找到深度2的对应节点
+    在深度2时，利用index中九个bit，找到深度3的对应节点
+    在深度3时，利用index后九个bit，找到对应条目————理论上叫叶子指针的那个东西。
+    然后走进去，就是我们所要的page table entry，PTE。
+
+    一个PTE是64个bit，我们需要全用吗？不需要，因为没那么大的PM
+    实际上，硬件工程师在设计这玩意的时候，假设PM里最多有2^44个page，所以我们只需要44位就好了。
+    空着的20个bit，10个放在高位，保留；10个放在低位，存flag。
+
+    因此我们找到对应的PTE，取前44位，这44个bit就包含了我们所需要的PA的信息，但他还不完全是PA，需要进行一个手动转换。
+    很友好的，riscv.h里为我们提供了这样的宏——PTE2PA和PA2PTE
+    注意显然这里是会丢flags的，所以在真的弄pte的时候，往往是需要进行一个| flags
+
+此即通过pageTable和VA找到PA的全过程。
+
+一些关于VA和PA的要点
+先看PA
+    qemu会搞一个从0x80000000开始，到0x86400000结束的RAM，而这个值即是PHYSOTP，而且是[)这样一个区间，非常关键。
+    在0x80000000以下的地址里装的是外设，就是在cpu实验见过的那些玩意儿。
+    在PHYSTOP以上的东西是没有东西，unused。
+
+再看kernel所在proc的VA
+    KERNBASE从0x80000000开始，上面是kernel的一些东西，比如kernel text和kernel data。
+    再靠上则是freeMemory，这里的内存顾名思义，是可用的，且，内核所在的proc的VA到PA的映射，是直接映射，PA是多少就是多少。
+    然后会撞上PHYSTOP
+    PHYSTOP之上还有一些东西，比如kstack1 GuardPage kstack0等等，这些东西都会往PA的freeMemory之前的地址映射。
+    在最上面，有一个叫Trampoline的东西，这个很精彩，后续会看到。
+    
+在看user所在的proc的PA
+    从0开始，text，data，guardpage，stack(PGSIZE)，heap，trapframe，trampoline。
+
+一些关于addressSpace的变量和函数
+    *pagetable_t，页表指针，就是应当被放进satp里的东西（大概
+    walk 传入pagetable, va, alloc，找对应的PTE
+    mappage 传入pagetable, va, size, pa, 还有个不知道啥用的param，在PA里，以pa为启示开数个page，直到能装下size为止，然后整块映射到va为起点的地址，好像一般通过kvmmap调用。
+
+
+    
