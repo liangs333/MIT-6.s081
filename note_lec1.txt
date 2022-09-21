@@ -1,0 +1,12 @@
+lec1整体来讲就是Robert带着我们简单过了一下整个XV6的顶层设计，以及一些听课人脑袋里应当有的概念。
+首先是OS的一些目标：
+    抽象，这个真的太重要了。
+    多任务或者multiplex，往后面学到proc那里感觉真的蛮神奇的。
+    Isolation，现在看来是通过内存分配机制和pagetable实现的，但是对于多个UserProgram对应的proc所包含的freelist是怎么共享的这个，还不太清楚。
+    Sharing，没看到，不懂。
+    Security，感觉包含在Isolation里面。
+    Performance，还不太懂。
+
+然后就是几个syscall，像open、read、write、exit、wait、exec等等，这里就不再做赘述了。
+
+
