@@ -1,0 +1,52 @@
+其实是2020年的一个叫lazy的lab
+由于出现在我校的OS课上了，就写了。
+代码在另一个仓库，note就凑合凑合放这儿吧。
+
+task1
+    把skrk函数里的分配关了
+
+task1_sol  
+    那就关了。
+
+task2 
+    实现lazyAllocation
+    通过修改trap.c，使得懒分配的Pages在有需要的时候能够实打实的分配下去
+    目标是跑通echo hi不会去世
+
+task2_sol  
+    我们现在有一些 应该设置好映射关系但实际上没有设置的VA
+    在访问这些东西的时候都会触发pageFault
+    我们期望在pageFault里真的给他们设置一下映射关系。
+    于是就是两个子问题
+        当前产生pageFault的VA，是由于lazeAllocation产生的VA，还是本身就是一个奇怪的VA？
+        换句话说，我们该给这VA映射到PA，还是该干掉userProg？
+
+        怎么给这个VA映射到PA？
+        怎么让userProg下一次能够真的通过VA访问到对应的PA？
+    
+    来挨个解决。
+    根据xv6对于VA的映射，我们可以知道，一个阳间的，可能会由于pageFault产生错误的va，一定不会比MAXVA还高，否则这不科学。
+    且，这东西一定不会在栈里或者更下方，即，这va高于栈顶指针。
+    且，这va比我们声称该proc所有的size还高，否则妥妥是假地址
+
+    如果该映射的话，那么kalloc，在PA里开一块儿空间
+    然后mappage过去，注意如果失败，那么该回收一定要回收。
+
+task3
+    处理新申请大小为负的空间，即回收一定空间
+    当因为一个假地址产生pageFault的时候，噶掉对应userProg
+    处理memcopy，那个从kernel到user的搬运函数
+    处理syscall里read和write可能会穿进去懒分配地址的情况
+    处理kalloc失败的情况————干掉对应userProg
+
+task3_sol
+    回收空间的时候要改一下uvmunmap，有些地方该continue就continue
+    uvmcopy的时候，用到的应该申请的内存要申请
+    copyin copyout copystr都会用到walkaddr，在这里加个应分配尽分配
+    而exec中，也用到了这玩意，所以改这个可以顺便解决sys_read之类的问题。
+
+整体来说还蛮好写的一个实验。
+就是注意好好判边界，其他的好像问题都不是很大。
+
+
+

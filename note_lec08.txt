@@ -1,0 +1,68 @@
+这堂课是Frans教授讲的关于pageFault的一大堆东西，包括但不仅限于 这是个啥 为啥 能干啥
+其实容量并不是很大，主要是粗略介绍了一下一些玩意儿的思想。
+非常不幸的是，这些个玩意儿是实验内容。
+让我们进入正题。
+
+pageFault看名字就和pageTable有关，关于pageTable的知识这里不再赘述，详见之前的lec_note
+pageFault会发生，当且仅当userProg干了不该干的事情
+    访问了一个PTE_U为0的VA
+    访问了一个PTE_V为0的VA
+    读了一个PTE_R为0的VA
+    写了一个PTE_W为0的VA
+    使用了假VA
+此时会产生一个pageFault，进而使得userProg进行一个trap，到kernel，kernel的trap处理函数会发觉这是一个pageFault。
+
+于此同时，在usertrap函数里，还可以通过访问STVAL寄存器，来看看引发pageFault的PTE是个啥
+当然也是可以查看trapframe->epc来看到之前的pc的。
+
+在原先的xv6里，这个userProg会直接被标记为killed，kernel直接开摆，不处理，只干掉
+而在更全面的OS里，可以利用pageFault完成一些非常有趣的机制。
+
+Lazy Page Allocation
+    当你在userSpace里申请增加一些PAGE时，userProg并不一定是真的很想用完他们，例如经典的int[1231231]，最后真不一定能用多少个。
+    那么，如果我们真的把这些page实打实分配过去，感觉就很亏，不妨等用到了再实际分配。
+    具体的，kernel只是先告诉userProg，你申请成功辣！
+    然后在userProg访问对应VA的时候，他会因为产生了pageFault而昏迷过去，在他昏迷期间，kernel可以把这块内存分配给他，然后把它叫醒
+    这样在userProg看来，啥都没发生，他正常的访问到了对应VA。
+    思路是这样，具体的细节我们咕进note_lab
+
+Copy_on_write Fork
+    在原先的xv6中，当我们fork一个进程时，我们会立即在PA里kalloc相同的空间
+    然后memmove，再把新proc的pageTable映射到我们新搞的这些PA上。
+    而对于一些喜欢fork()然后exec的程序来说，这空间真就白费了，血亏
+    不妨我们把这俩proc的pageTable映射到相同的东西上，读的话，无事发生，有人要写某个PAGE的话，新建一个副本给他写
+    莫名感觉有点像可持久化耶。
+    
+    但是出现了一个问题，我们什么时候才能真正kfree一个page呢？（当然你可以选择不kfree他然后被usertest橄榄
+    当没有pte指向他的时候，我们才能free他，不然会造成某些proc找不到本来应该能用的VA
+    因此需要引入 引用计数机制，在没人指向的时候free
+    思路是这样，具体的细节我们咕进note_lab
+
+Zero Fill on Demand
+    int mat[5010][5010]实际上干了两件事，申请，赋值。
+    但这赋值还蛮特殊的就是了，他是赋值为0
+    所以可以考虑和lazyAllocation相同的思路。
+    kernel告诉userProg，你申请成功辣，然后悄悄咪咪把这些page映射到同一个PA，再发一大车PTE_W为0的pte给userProg
+    然后user读的时候雀食没问题，那你读好了
+    要修改这个矩阵里的某些元素的时候会产生pageFault晕过去
+    kernel这时候再kalloc一个PAGE，赋值，然后改改userSpace的pageTable，换一下pte
+
+Demand Paging
+    xv6把指令存进内存里。
+    真有必要在程序一开始就把这些指令全都从外存挪到内存吗？没有的。
+    为VA的text和data段分配一大车PTE_V为0的pte，然后静待pageFault，到时候再分配。
+
+Memory Mapped File
+    这位更是重量级。
+    mmap(va, len, protection, flags, fd, offset)
+    把fd从offset开始的len长度，映射到va里，加上protection和flags
+    Frans讲的也很含糊，不过问题不大，反正后续会有个note_lab的。
+    
+
+关于内存耗尽的一些题外话
+    内存没了咋办？撤回一些page，即，把page里的东西放进外存，然后kfree。
+    谁先倒霉？LRU = Least Recent Used
+    小优化————优先选择非Dirty Page
+    定义被修改过的page为Dirty的
+    因为如果撤销了一个dirtyPage，下次修改的时候，对他写两次（？实话实话有点懵，没有实验还是不太行。。
+
