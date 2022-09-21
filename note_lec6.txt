@@ -1,0 +1,74 @@
+深夜睡不着觉起来写note是怎么一回事（
+lec5因为是TA的课，我没看视频，只是看了下大概的内容，所以没有note，鸽在这里。
+言归正传。
+
+回想syscall实验中，有一个地方对于当时是我们是完全不明晰的，即，userProg调用了汇编指令ECALL之后，发生了什么事情，使得我们进入了kernelProc？
+从之前的学习中，我们可以了解到，一个proc想要正确的执行，需要一大车寄存器。而这些寄存器又是如何在切换的过程中，保持不出问题的？
+以及，我们最后是如何从kernelProc回到userProc的，以及该过程中，寄存器发生了什么？
+
+以上整个过程被称为trap，陷入，即从userProc陷入了kernelProc。
+
+而lec06就是负责解决上述问题的。
+
+先整理一下，cpu在一个proc上跑着的时候，会用到什么东西：
+    32个userRegister，不用多说，写过CPU就知道。
+    satp，pageTable那里有讲到
+    PC，也是写过CPU就知道的。
+    那个用来表明cpuMode的标志位，先前的lec应该提到过
+    会用到一个堆栈，因此有堆栈寄存器，其实包含在userRegister里。
+
+再重申一下我们希望达成的效果————、
+    整个切换过程对于userProg是完全不可见的
+    调用ECALL之后，该proc就昏迷过去了，再醒来的时候发现无事发生，除了syscall已经完成了，所需的事情已经做完了
+    而PC、userRegister、堆栈里都还是原来的数据，使得这个proc能够真的跟无事发生一样，继续运行。
+
+而矛盾点就出现了————
+    kernel也是C语言程序，因此cpu在跑kernelProc的时候，C语言程序所需的东西一个都少不了。
+    难以避免的。会用到userRegister、satp、PC，堆栈寄存器也是
+    且，我们不希望userProc存在寄存器里的数据们丢失，我们需要以某种神奇的方式保存他们。
+    对于userRegister的处理还算好想，而对于satp和PC的处理则会有一个巨大的问题，这里也是最能体现出设计精妙的部分
+    指令放在内存中，如果我们更改了SATP或者PC中的任意一个，我们找不到我们期望执行的下一句话了。
+
+不仅是从userProc进入kerelProc的时候会遭遇上述问题，返回的时候，同样的事情会反向发生一遍
+来看xv6如何解决上述问题。
+
+先介绍几个在后文中会用到的寄存器
+    STVEC 用于存储 处理trap指令 的起始位置，可以感觉到，这个东西应该会是给pc用的。
+    SEPC 用于在trap过程中保存PC的值
+    SSRATCH 暂时不是很知道是干嘛用的，但是后面会知道
+
+根据上述期望达成的效果，预览一下我们希望在从userProc进入到kernelProc时做的事情
+    把userProc的PC放在某个位子，然后把PC指向某个用来处理userProc -> kernelProc的东西
+    把userProc用过的32个userRegister放在某个地方，包括堆栈寄存器
+    把userProc用过satp放起来
+    改变那个权限bit
+    把satp改了，且在改掉satp之后，用某种神奇方式使得我们能够找到我们想进行的下一个条指令
+    把堆栈寄存器改了
+    把PC改到内核C语言程序部分处理trap的部分，然后可以开始跑内核的C语言程序了。
+
+一个非常重要的问题，在我们保存好32个userRegister之前，我们其实是不能复写其中的任何一个的，否则会造成数据丢失。
+即我们期望在不写入寄存器的前提下，完成一大车sd指令，把32个寄存器存到对应位子
+学过汇编的都知道，这好像有点强人所难
+
+回忆一下syscall_lab，在那里，在userSpace的跳板函数生成的汇编中，有一个叫ECALL的机器指令，故事从这里开始。
+
+ECALL指令只做三件事（公平公平还是tmd公平（X
+    改变权限bit，因为后续执行的代码是来自kernel的友好代码，所以在这里改变权限bit不会发生奇怪的事情。
+    SEPC = PC，这显然很必要
+    PC = STVEC，这指示我们后续该执行啥玩意
+
+然后，我们进入了 一个userRegister都不能用 的状态，急需什么东西来解救一下，而这个救命的东西就是当前PC所指的指令
+    csrrw a0, sscratch, a0   用于把a0和sscratch交换。这样我们就有了一个可用的寄存器。
+
+而后就是朴实无华的一连串保存，把32个userRegister存下来。而问题来了，存在哪儿？
+阅读proc.c，我们可以发现，在内核创建proc的时候，会在PA里申请一个page，让新proc里的一个指针指过去，该指针叫trapframe
+而后会在创建pageTable的时候，把这个指针指向的地址映射到一个很高很高的VA
+就把32个userRegister存在这个page里的一个叫trapframe的结构体就好。
+然后从这个结构体里取出早就保存好的，kernelProc运行时需要的一些东西，比如处理trap的函数的地址即kernel_pc、satp、sp啥的。
+然后把该改的都改了，最后把PC指过去。
+
+问题就在这里了。我们改了satp之后，程序为什么没有崩掉，即，换了pageTable，我们的pc为啥还能起作用？
+这里设计是，在kernelSpace和userSpace中，TrampolinePage映射到的是同一个VA。
+
+而后的故事就不是非常的精彩了，基本就是上述操作的一个反向，这里略去
+只需注意，再次返回userProc时，pc会指向trapframe -> epc就好，这就足够搞定实验了。

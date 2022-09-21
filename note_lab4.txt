@@ -1,0 +1,57 @@
+这次的note有个比较搞人的问题，即我们怎么在kernelSpace执行userSpace里的代码？
+又或许，真的有这个需求吗？
+以及我们要不要mappage？
+搞清楚这三个问题之后，感觉自己对于trap的理解突然就深刻了一大截子。
+来看实验吧。
+
+task0
+    汇编小测试，摸了。
+
+task1
+    魔改一个系统调用，在sys_sleep()生效时，打印出函数调用关系的backtrace，即递归地打印栈帧信息
+
+task1_sol
+    好像没啥好说的，栈帧结构构成了一个链表，看看lec05就知道该往哪跳以及该输出什么了，不太有亮点的一个task
+    自己写（贴）一个r_fp()，读取寄存器就好。
+    然后注意判一判，跳链表的时候有没有跳出到奇怪的地方去，提示告诉我只有一页，那判一判在不在这一页就好。
+
+task2
+    实现俩系统调用
+    sigalarm(interval, handler)负责设置，每当经过interval个TimerInterrupt，就运行一次handler所指向的函数
+    sigreturn()负责启发玩家怎么实现第一个调用，在test脚本里，handler以sigreturn结尾。
+    显然这玩意不应当影响到userProg
+    额外要求：正在执行handler指向的函数时，遇到timerInterrupt，只累加，不执行，到点清零。
+
+task2_sol
+    还蛮有意思的，最直击心灵的问题是，怎么在kernelSpace里跑UserSpace的代码？
+    我们压根不需要在kernelSpace跑，XD
+    只需要在trap里搞个计数器统计timerInterrupt个数，到点回到userProg时，进入到我们想去的地方就好。
+    然后跑完handler指向的函数，再通过某种机制让他回到userProg原先的地方，恢复现场即可
+
+    显然handler指向的函数可能会用到userRegister，为此我们不能让这里的userRegister覆盖了原先的userProg用到的userRegister。
+    那咋办呢？搞个trapframe副本咯，发生该事情时，把trapframe直接memmove进trapframe_copy，然后把trapframe里的epc改到handler指向function的起点
+    其他的啥都不用动，因为是同一个userProg，相同的stack，而其他的userRegister按理来讲不会被直接读取，覆盖了就覆盖了无所谓。
+
+    然后正常返回，这样trapret就会把我们的PC指向*handler，然后该跑啥跑啥
+    由于handler最后一句话是sigreturn，我们在这句话触发trap后，会再一次进入到kernel，此时把trapframe_copy给memmove到trapframe
+    然后假装无事发生就行了。
+
+    至于不要重复执行handler这件事，在proc里面额外加一个用来判断是否正在执行的bit就好。
+    在瞎改trapframe->epc前置1，sigreturn时置0
+
+    简单理一下我们需要在trap里加啥
+        *trapframe_copy，代码里叫originalTrapFrame
+        tickPassed
+        alarmInterval
+        alarmActivated，现在想想好像不是很有必要，用alarmInterval判一判就好
+        doingAlarmNoW
+        *alarmHandler
+    然后搞就完事了。
+
+至于要不要把trapframe_copy进行一个mappage，自然是不要的
+我们并不需要在userSpace里访问这玩意，userSpace甚至不应当知道存在这玩意，当然不需要mappage
+所以只是在kernelSpace里kalloc一下就好。
+哦记得如果kalloc失败的话，该free就free
+后面mappage失败的话，也是得free
+不然可能会内存泄漏然后被usertest查出来。
+
