@@ -1,0 +1,87 @@
+这一节课Frans主要是讲了和interrupt有关的一些玩意儿，但是说实话没有太弄明白那个UART驱动是怎么个回事儿
+可能后面要继续磨一磨，这个note就先写我现在已经有的一些理解吧。
+
+interrupt和syscall、pagefault一样，可以使得userProg通过trap机制进入到kernel
+显然这种trap根据我们之前的学习，对于userProg应该是不可见的
+他只是单纯的晕过去又醒过来，甚至不会意识到自己晕过去这件事。
+
+interrupt有蛮多种类的，比如设备interrupt、timerInterrupt等
+这节课主要聚焦于设备产生的interrupt，即对应在trap.c里，usertrap中的devintr()这一项。
+
+interrupt有一些与syscall、pageFault不同的特点
+    异步性 当interrupt发生时，interruptHandler和当前cpu没有任何关系。相对的，syscall发生时，syscallHandler运行在myproc() -> context
+    并行性 当interrupt发生时，cpu可能在做任何事，注意是任何事，生成interrupt的设备和cpu是真正意义上的并行的。
+    而由于产生interrupt的设备并不是我们所熟悉的那套东西，我们还需要关注对应设备的手册。
+
+这节课后续的内容会聚焦于，当打开xv6成功运行后，console上的$符号是如何出现的
+以及，在我们通过键盘输入内容时，该内容是如何显示到console上的。
+
+先来介绍一个芯片 PLIC
+    Platform Level Interrupt Control
+    用来接受并保存interrupt，告诉cpu核心们，这里有一个interrupt待处理
+    其中一个cpu核心会声称接受interrupt，并处理
+    然后PLIC就可以扔掉该interrupt的信息了。
+
+再来介绍一个芯片 UART
+    Universal Asynchronous Receiver/Transmitter
+    今天课程的主要内容就是这玩意。
+
+显然CPU并不会天然地知道该怎么处理一个来自外设的interrupt，这里就需要一些神奇的程序了
+通常来说，管理设备的代码叫驱动。（总算知道驱动是拿来干嘛的了
+
+驱动一般被分为两个部分，top和bottom。
+    其中bottom部分是InterruptHandler
+    注意该handler并不运行在任意特定的context。
+    而top部分则是一些接口
+    对于UART芯片，这里是read和write接口，用于被kernel、userProg调用。
+
+一般来讲，独立于cpu运行的设备是有buffer的，因为我们希望这俩东西能并行运行
+所以需要找一些位子来存储那些 还没有被cpu及时响应获取的东西。
+
+需要注意的是，设备上的buffer之类的玩意儿显然并不存在于计算机的RAM里，所以我们访问这些地方时，会调用在0x80000000以下的PA
+这里的读写一般用mem mapped I/O执行（说实话不是很清楚这是个啥
+
+
+接下来一起来探索两个过程：
+    运行XV6，到$出现在console
+    键盘上敲下ls，ls在$后出现
+
+课上还穿插了在启动xv6的时候如何设置PLIC和一大把寄存器，使得CPU能够接收中断，感觉并不是本次课的重点，这里摸了。
+
+先看过程1，即$的出现
+    运行main.c里的main()后，首先创建了一个代表console的设备
+    然后把stdout、stderr、stdin都丢过去，fd是0 1 2
+    然后shell程序向fd 2输出$    
+    对于shell来讲，他只是像一个fd里输出了字符$，简简单单fprintf
+    fprintf会使用系统调用sys_write
+    sys_write会调用filewrite，定义在file.c里头
+    在filewrite里，会检查这个fd是个啥东西————inode？pipe？device？
+    显然我们今天的这个应该是指向device，这里会调用对应设备的write函数，该例子里即consoleWrite，定义在console.c
+    consoleWrite会先调用either_copyin，把要打印的字符放进临时变量，然后调用uartputc
+    在uartputc里，会先acquire一个spinlock，然后把要打印的字符扔进一个环形buffer
+    然后调用uartstart，然后释放锁
+    锁和环形buffer都不是今天的重点，但uartstart是。
+
+    我们来看看uartstart干了什么
+        首先看看buffer里面有没有待发送的字节
+        如果有，且当前设备空闲，没有正在发送什么其他东西的话
+        那么会从buffer里取出一个字节，写入到THR Transmission Holding Register
+    目前为止，我们完成了工作的前半部分。
+    即，完成了从shell到uart的步骤，那么下一步，当我们把$从uart发送到console，就大功告成了。
+    看看接下来会发生什么
+        uart会产生一个interrupt
+        幸运cpu接受了这个interrupt，发觉是一个来自UART的DevInterrupt
+        调用uartintr函数。
+        uartintr调用uartgetc，搞到上述字符
+        然后调用consoleintr，consoleintr会看看是不是特殊字符
+        如果不是，会把字符通过consoleputc，echo给user，并存储在buffer里
+
+从键盘的输入大同小异，只不过第一步不再是shell->uart，而是keyboard->uart，这里不做赘述
+
+额外提一句，在处理任何类型的interrupt的时候，我们都需要关闭对应cpu处理interrupt的那个bit
+cause we dont want an interrupt interrupt an interrupt
+XD
+
+
+
+
