@@ -79,7 +79,7 @@ interrupt有一些与syscall、pageFault不同的特点
 从键盘的输入大同小异，只不过第一步不再是shell->uart，而是keyboard->uart，这里不做赘述
 
 额外提一句，在处理任何类型的interrupt的时候，我们都需要关闭对应cpu处理interrupt的那个bit
-cause we dont want an interrupt interrupt an interrupt
+cause we dont want an interrupt to interrupt an interrupt
 XD
 
 
