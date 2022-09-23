@@ -165,6 +165,7 @@ bad:
   return -1;
 }
 
+
 // Is the directory dp empty except for "." and ".." ?
 static int
 isdirempty(struct inode *dp)
@@ -284,6 +285,34 @@ create(char *path, short type, short major, short minor)
 }
 
 uint64
+sys_symlink(void)
+{
+  char target[MAXPATH], path[MAXPATH];
+  struct inode *ip;
+
+  if(argstr(0, target, MAXPATH) < 0 || argstr(1, path, MAXPATH) < 0)
+    return -1;
+
+  begin_op();
+
+  ip = namei(path);
+  if(ip == 0) {
+    ip = create(path, T_SYMLINK, 0, 0);
+    iunlock(ip);
+  }
+
+  ilock(ip);
+  //writei(struct inode *ip, int user_src, uint64 src, uint off, uint n)
+  if(writei(ip, 0, (uint64)target, ip->size, MAXPATH) != MAXPATH)
+    panic("sys_symlink FAULT");
+  iunlockput(ip);
+  end_op();
+  return 0;
+}
+
+
+
+uint64
 sys_open(void)
 {
   char path[MAXPATH];
@@ -321,6 +350,31 @@ sys_open(void)
     end_op();
     return -1;
   }
+ struct inode *ipp;
+  if(ip->type == T_SYMLINK && (!(omode & O_NOFOLLOW))) {
+    //注意ip在这里是被锁上的，需要保持从while出去的时候也是有锁的
+    int count = 0;
+    while(ip -> type == T_SYMLINK) {
+      count++;
+      char buf[233];
+      if(readi(ip, 0, (uint64)buf, ip->size-MAXPATH, MAXPATH) != MAXPATH) { 
+        iunlockput(ip);
+        end_op();
+        return -1;
+      } 
+      iunlockput(ip);
+      if((ipp = namei(buf)) == 0) {
+        end_op();
+        return -1;
+      }
+      if(count >= 10) {
+        end_op();
+        return -1;
+      }
+      ip = ipp;
+      ilock(ip);
+    }
+  }
 
   if((f = filealloc()) == 0 || (fd = fdalloc(f)) < 0){
     if(f)
@@ -344,6 +398,8 @@ sys_open(void)
   if((omode & O_TRUNC) && ip->type == T_FILE){
     itrunc(ip);
   }
+
+
 
   iunlock(ip);
   end_op();

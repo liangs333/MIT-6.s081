@@ -377,7 +377,7 @@ iunlockput(struct inode *ip)
 static uint
 bmap(struct inode *ip, uint bn)
 {
-  uint addr, *a;
+  uint addr, *a, *aa;
   struct buf *bp;
 
   if(bn < NDIRECT){
@@ -396,11 +396,41 @@ bmap(struct inode *ip, uint bn)
     if((addr = a[bn]) == 0){
       a[bn] = addr = balloc(ip->dev);
       log_write(bp);
+      //注意按照说明书使用这玩意
     }
     brelse(bp);
     return addr;
   }
 
+  struct buf *bpinin, *bpin;
+  bn -= NINDIRECT;
+  if(bn < NININDIRECT) {
+    if((addr = ip->addrs[NDIRECT + 1]) == 0) {
+      ip->addrs[NDIRECT + 1] = addr = balloc(ip -> dev);
+    }//申请一个新块儿，作为ININDIR
+    bpinin = bread(ip -> dev, addr);
+    a = (uint*) bpinin -> data;
+    //a指向ININDIR里的条目些个
+    uint targetBlock = bn / NINDIRECT;
+    if((addr = a[targetBlock]) == 0) { 
+      a[targetBlock] = addr = balloc(ip -> dev);
+      log_write(bpinin);
+    } 
+    brelse(bpinin);
+
+    bpin = bread(ip -> dev, addr);
+    aa = (uint*) bpin -> data;
+    uint targetLoc = bn % NINDIRECT;
+    if((addr = aa[targetLoc]) == 0) {
+      aa[targetLoc] = addr = balloc(ip -> dev);
+      log_write(bpin);
+    }
+    brelse(bpin);
+    if(addr == 0) {
+      panic("GG in bmap");
+    }
+    return addr;
+  }
   panic("bmap: out of range");
 }
 
@@ -411,7 +441,8 @@ itrunc(struct inode *ip)
 {
   int i, j;
   struct buf *bp;
-  uint *a;
+  struct buf *bpin, *bpinin;
+  uint *a, *ina;
 
   for(i = 0; i < NDIRECT; i++){
     if(ip->addrs[i]){
@@ -422,7 +453,7 @@ itrunc(struct inode *ip)
 
   if(ip->addrs[NDIRECT]){
     bp = bread(ip->dev, ip->addrs[NDIRECT]);
-    a = (uint*)bp->data;
+    a = (uint*) bp->data;
     for(j = 0; j < NINDIRECT; j++){
       if(a[j])
         bfree(ip->dev, a[j]);
@@ -430,6 +461,26 @@ itrunc(struct inode *ip)
     brelse(bp);
     bfree(ip->dev, ip->addrs[NDIRECT]);
     ip->addrs[NDIRECT] = 0;
+  }
+
+  if(ip->addrs[NDIRECT + 1]) {
+    bpinin = bread(ip->dev, ip->addrs[NDIRECT + 1]);
+    ina = (uint*) bpinin -> data;
+    for(int j = 0; j < NINDIRECT; ++j) {
+      if(ina[j]) {
+        bpin = bread(ip->dev, ina[j]);
+        a = (uint*) bpin -> data;
+        for(int k = 0; k < NINDIRECT; ++k) { 
+          if(a[k])
+            bfree(ip->dev, a[k]);
+        } 
+        brelse(bpin); 
+        bfree(ip->dev, ina[j]);
+      }
+    }
+    brelse(bpinin);
+    bfree(ip->dev, ip->addrs[NDIRECT + 1]);
+    ip->addrs[NDIRECT + 1] = 0;
   }
 
   ip->size = 0;
