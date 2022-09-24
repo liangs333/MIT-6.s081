@@ -1,0 +1,89 @@
+这堂课主要讲了thread的切换，Thread Switching
+但是呢，由于xv6每个proc仅持有一个thread，所以其实是proc的切换HH
+说是切换也不准确，由于难以避免的会遇到“换到哪个线程上”的问题，因此还有一个调度在里面
+称之为scheduling会更加全面一些。
+
+主要是集中在三个问题上
+    怎么切换，换到那儿
+    切换的时候保存什么，使得下一次回到这个线程的时候，他还能正常运行
+    如何处理运算密集型线程（可能一个线程卡那儿了）
+
+关于第三个问题的答案我们已经很明晰了————TimerInterrupt会让线程把CPU交出来的。
+这里的描述是，让线程把CPU交出来，事实确实如此。
+我们并不想由外界强行拉闸一个线程，而是会希望，这个线程确定自己没有处在什么不得不做完的事务之中时，主动地转让cpu
+具体的，timerInterrupt会把控制权从userProg转移到kernel上，而kernel会代为转让cpu，这个过程我们成为yield
+而对于一个线程来讲，如果他正处于“不希望被打扰的状态”，那么他理应持有一把锁，也就处于了intr_off状态。
+
+接下来解决第一个问题，我们换到哪儿？
+通过阅读代码我们可以得知，线程有自己的状态
+    RUNNING
+    RUNNABLE
+    SLEEPING
+先只看这三个状态好了
+其中RUNNING自不必说，RUNNABLE表示，当前线程已经万事俱备，只欠cpu了
+SLEEPING表示，当前线程除了CPU还缺点儿啥，即使把CPU给他，他也会因为其他资源的缺乏，而无法正常运行
+    可能在等待IO、等待另外一个线程干什么事儿之类的。
+    这将会是下一节课的重点
+所以显然我们会切换到RUNNABLE状态的线程。
+
+接下来我们重点分析从RUNNING线程切换到RUNNABLE线程的过程
+
+由于XV6的设计，并不会出现从一个userProc直接切换到另一个userProc的过程
+取而代之的是userProc1 -> kernel1 -> scheduler -> kernel2 -> userproc2这样一个过程
+
+userProc1 -> kernel1的途径是usertrap，而kernel2 -> userproc2的途径是usertrapret
+显然我们可以期望userProc2上一次进入kernel2时，是通过trap进去的，所以这里ret无可厚非。
+这两步是属于trap那一章的内容，这里不做赘述。
+
+重点关注kernel1 -> scheduler -> kernel2的过程
+
+通过阅读代码，我们知道，在kernel1决定让出cpu时，他会运行一个叫yield()的玩意儿
+    void yield(void)
+    {
+      struct proc *p = myproc();
+      acquire(&p->lock);
+      p->state = RUNNABLE;
+      sched();
+      release(&p->lock);
+    }
+这东西内部会改一改当前proc的state，然后调用一个叫sched的东西
+还可以看到，这里有一个spinlock的acquire和release，看起来是配对的。
+sched会调用一个叫swtch的东西，又是我们最喜欢的汇编语言程序
+sched负责把当前kernel用到的Registerr保存在proc->context里面，然后读取了一大堆Register
+其中并没有涉及到PC，因为当前的PC需要指向当前的指令，改了就坏事儿了。
+那怎么通过类似于trap实验中修改trapframe->epc的方式，来使得在函数调用结束后，回去我们想去的地方呢？
+ra寄存器，returnAddress
+
+在从swtch返回后，我们已经换成了执行scheduler所需的context，并且已经来到了scheduler里面。
+  for(;;){
+    intr_on();
+    for(p = proc; p < &proc[NPROC]; p++) {
+      acquire(&p->lock);
+      if(p->state == RUNNABLE) {
+        p->state = RUNNING;
+        c->proc = p;
+        swtch(&c->context, &p->context);
+        c->proc = 0;
+      }
+      release(&p->lock);
+    }
+  }
+
+可以发觉scheduler里也有个对于锁的acquire和release
+认真思考，可以发现，在这里有一个错位对应。
+观察p1->lock，这个lock在p1对应的kernel即将执行sched函数时获取
+跳转到scheduler后释放
+等到scheduler下一次看到p1，跳转到p1前时会获取这个锁
+然后进去p1之后释放。
+个人认为是本堂lec最重要的一个地方。
+如果单纯的理解成一一对应，则会有一大车死锁类似的问题。
+
+至于上锁的原因，显然我们不希望俩cpu一起跑一个proc
+
+而注意到，我们每次从kernel跳转到scheduler，或者从scheduler跳转到kernel的时候，我们都希望存在“上一次从对方跳过来”这件事情
+所以在第一次启动的时候，需要用到一些 神奇的技巧 来伪造这样一个事实，具体的可以看看那个forkret函数
+有一种乱搞的美
+
+以及，根据我们对于锁的理解，我们肯定不希望，某个proc在即将被切换的时候还持有锁。
+除了myproc() -> lock
+这也就是sched()里面那一大车if-panic结构的作用之一了。

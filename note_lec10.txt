@@ -98,4 +98,5 @@ spinlock的实现：
     我们显然不希望代码从criticalSection里跑到外面去或者反之
     因此，锁的acquire和release都包含了synchronize指令
     某种意义上 对于编译器的一个屏障，不准把代码跨越这根线
-    
+    本次lec对应的实验有让我们写这玩意，但是说实话感觉这实验有点过于水hh
+
