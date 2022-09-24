@@ -21,12 +21,13 @@ struct run {
 struct {
   struct spinlock lock;
   struct run *freelist;
-} kmem;
+} kmem[NCPU];
 
 void
 kinit()
 {
-  initlock(&kmem.lock, "kmem");
+  for(int i = 0; i < NCPU; ++i) 
+    initlock(&kmem[i].lock, "kmem");
   freerange(end, (void*)PHYSTOP);
 }
 
@@ -55,11 +56,13 @@ kfree(void *pa)
   memset(pa, 1, PGSIZE);
 
   r = (struct run*)pa;
-
-  acquire(&kmem.lock);
-  r->next = kmem.freelist;
-  kmem.freelist = r;
-  release(&kmem.lock);
+  push_off();
+  int ncpu = cpuid();
+  acquire(&kmem[ncpu].lock);
+  r->next = kmem[ncpu].freelist;
+  kmem[ncpu].freelist = r;
+  release(&kmem[ncpu].lock);
+  pop_off();
 }
 
 // Allocate one 4096-byte page of physical memory.
@@ -69,14 +72,38 @@ void *
 kalloc(void)
 {
   struct run *r;
-
-  acquire(&kmem.lock);
-  r = kmem.freelist;
+  push_off();
+  int ncpu = cpuid();
+  acquire(&kmem[ncpu].lock);
+  r = kmem[ncpu].freelist;
   if(r)
-    kmem.freelist = r->next;
-  release(&kmem.lock);
+    kmem[ncpu].freelist = r->next;
+  release(&kmem[ncpu].lock);
 
   if(r)
     memset((char*)r, 5, PGSIZE); // fill with junk
+  else { 
+    //感觉这会是一个相当频发的事情，至少在程序刚刚开始的时候是这样。
+    //没准在freeRange里面加一个雨露均沾会更好一点？但是感觉可能会出奇怪的bug，还是摸了罢
+    for(int i = 0; i < NCPU; ++i) {
+      if(i == ncpu) 
+        continue;
+      acquire(&kmem[i].lock);
+      r = kmem[i].freelist;
+      if(r) { 
+        kmem[i].freelist = r->next;
+        release(&kmem[i].lock);
+        break;
+      } 
+      else { 
+        release(&kmem[i].lock);
+        continue;
+      } 
+    } 
+  } 
+
+  if(r)
+    memset((char*)r, 5, PGSIZE); // fill with junk
+  pop_off();
   return (void*)r;
 }
