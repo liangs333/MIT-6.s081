@@ -1,0 +1,93 @@
+这lab可真是太重量级了woc
+俩字儿 酸爽。
+虽然时间并没有花费太多，但是可以很明显地感觉到，和之前lab的运动量不是一个级别的。
+
+整个lab只有一个task，但是非常的重量级，还是手动拆分成三个subtask来讲好了。
+
+subtask1
+    实现syscall void* mmap(void* addr, uint64 length, int prot, int flag, int fd, uint64 offset);
+    其中保证addr和offset为0，不需要考虑这两项
+    需要实现一下功能
+        从文件fd的offset处开始，映射length长度的内容，映射到addr开始的地址
+            在本lab中保证offset为0，即从文件头开始
+        在本lab中保证addr为0，即由kernel来选往哪个addr放
+        需要保证分配的va连续
+        其中传入的prot为一个针对于PTE的描述性mask，用于描述该由mmap涉及到的va对应pte的访问权限
+            PROT_READ PROT_WRITE 对应PTE_R PTE_W这样
+        其中传入的flag为一个针对于file的描述性mask，用于描述在该段地址发生的修改是否需要写回file中
+    返回kernel所选的起始addr，如果出错，返回0xffffffffffffffff
+
+subtask1_subsol1
+    由于subtask1都过于庞大，我们拆分成两个subsol，subsol1做lazyAllocation，subsol2去实装这些lazyPage
+
+    根据hint以及关于userVM的lec提到的，建立一系列VMA单元，即Virtual Memory Area，用来记录mmap产生的连续的地址的信息
+    需要包含以下内容
+        文件offset（原因后续会提到
+        启示地址
+        终止地址（想了想其实不需要，没用到HHH
+        文件有效内容长度
+        file指针、inode指针
+        prot参数、flag参数
+        用于指示该VMA是否被用到的提示bit
+    根据hint，采用lazyAllocation的策略，在我们访问特定page的时候，再从file里复制内容。
+    那么问题出现了，我们去哪儿找一大块儿空闲内存？
+    根据lazy lab的启发，显然myproc() -> sz以上的玩意儿都是空的，我们从这里申请一块儿过去。
+    于是mmap函数需要干什么就很显然了————在proc里找一个空闲的VMA，把对应数据塞进VMA
+    lazy分配能够装得下整个length的 整 页 数 ，由于sz需要保证被PGSIZE整除，不然会报panic
+    加一加sz就行。
+    另外，注意权限，这里指的是 mmap需要的权限和fd的权限不匹配的问题，比如fd不让读，但是mmap想读。
+    然后记得filedup，增加file的观察者数量。
+
+subtask1_subsol2
+    通过修改userTrap，实装上文提到的lazyAllocation中的Allocation部分。
+
+    依照lazy lab的经验，拿到一个13 / 15错误时，首先判地址。
+    这是不是一个真的地址，这个地址是不是在sp上面，是不是在sz下面
+    如果都是，那么说明他可能命中了一个mmap制造的VMA。
+    依次check所有的vma，检查是否存在一个mmap制造出的lazyVA区域正好包括该VA
+        如果找不到，那么直接做掉该进程，说明他确实访问到奇怪的东西了。
+    如果找到了，那么应当为该VA分配一个page，page的内容应当是file对应部分。
+    然后又是经典的
+        从PM里kalloc一个page
+        往page里填充东西，如果填充失败，记得kfree
+        mappage，如果mappage失败，记得kfree
+        很难描述之前的内存泄漏给我留下了多大的悲伤
+        并且，kfree之后，记得把当前proc做掉
+        哦，往page填充东西的步骤会用到readi，需要用ilock和iunlock包裹
+    注意mappage之前根据prot来决定该条PTE的flags部分应该有些什么玩意儿
+
+
+subtask2
+    实现syscall int munmap(void* addr, uint64 length);
+    需要实现以下功能   
+        从传入的addr开始，取消内容长度为length的mmap
+        保证该函数的调用一定满足 掐头去尾 规则
+        不会砍中间
+        可能整个砍没了
+
+subtask2_sol
+    自然是要先找到vma的，然后掐头去尾分开判
+    当且仅当，一页Page里的所有内容都被munmap掉之后，才能unmap这一页page
+    在unmap和freePage之前，记得做文件内容的回填
+    我的实现需要魔改filewrite，实现一个支持文件offset的文件回填。
+    （其实就是改了两个变量
+    然后，如果是掐头，那么需要在vma里对应地修改起点addr，且掐头之后相当于为文件添加了offset，记得加上
+    如果是去尾，那么只用改一改vma里的length就好了，addr和offset都不是很用动
+    如果是整个砍没了的情况，那么还需要清零对应的vma，并且关掉对应的文件
+    只能说得亏fileWrite的API给的比较的好用，不用哥们自己写保存文件的那地方
+
+subtask3
+    使得mmap munmap对于fork()得到的子进程能够正常访问
+    使得进程在exit的时候能够合理保存应该保存的文件
+
+subtask3_sol
+    使得fork()的子进程继承vma就好
+    然后需要注意的是，uvmcopy处，如果遇到了lazyPage会报panic，注释一下就行。
+    好像还有个什么地方也会遇到lazyPage然后panic
+
+    关于exit的对于文件的修改，在exit的时候遍历一下vma列表，对于还活着的vma，手动释放一下就行
+    这段代码可以很大程度上照抄munmap的内容
+
+呼，搞定！
+
+
