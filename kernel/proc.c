@@ -5,6 +5,7 @@
 #include "spinlock.h"
 #include "proc.h"
 #include "defs.h"
+#include "fcntl.h"
 
 struct cpu cpus[NCPU];
 
@@ -301,6 +302,18 @@ fork(void)
       np->ofile[i] = filedup(p->ofile[i]);
   np->cwd = idup(p->cwd);
 
+//  printf("In fork before memmove VMA\n");
+  struct VMA *vp; 
+  for(int i = 0; i < VMANUM; ++i) { 
+    vp = &(p -> vma[i]);
+    if(!vp -> used)
+      continue;
+    filedup(vp -> fp);
+    memmove(&(np -> vma[i]), &(p -> vma[i]), sizeof((np -> vma[i])));
+    //这里memmove不规范会报panic: acquire，不知道为什么
+  } 
+//  printf("In fork after memmove VMA\n");
+
   safestrcpy(np->name, p->name, sizeof(p->name));
 
   pid = np->pid;
@@ -315,6 +328,7 @@ fork(void)
   np->state = RUNNABLE;
   release(&np->lock);
 
+//  printf("Ready to leave fork\n");
   return pid;
 }
 
@@ -333,6 +347,50 @@ reparent(struct proc *p)
   }
 }
 
+
+void freeMmap(struct VMA *vp) { 
+  if(vp == 0 || vp -> used == 0)
+    panic("GG in freeMMAP");
+  uint64 addr = vp -> staddr;
+  uint64 length = vp -> length;
+  struct proc *p = myproc();
+  if(addr == vp -> staddr) { // 掐头
+    uint64 lef = vp -> staddr, rig = vp -> staddr + length;//砍掉[ )  
+    if(rig > vp -> staddr + vp -> length) {
+      panic("overCut");
+    }
+    uint64 naddr = PGROUNDDOWN(lef);
+    if(vp -> flag & MAP_SHARED)
+      filewriteWithOffset(vp -> fp, addr, length, vp -> offset);
+    // 写文件
+    while(naddr + PGSIZE <= rig) { 
+      //这里符号感觉不是很好说有没有等于
+
+      //uvmunmap(pagetable_t pagetable, uint64 va, uint64 npages, int do_free)
+      uvmunmap(p -> pagetable, naddr, 1, 1);
+      naddr += PGSIZE;
+    } 
+    vp -> staddr = rig; // 尾巴不需要动的
+    vp -> offset += length;
+    printf("cut head success\n");
+  } 
+  vp -> length -= length;
+  if(vp -> length == 0) { //整个儿木大了
+    fileclose(vp -> fp);
+    vp -> edaddr = 0;
+    vp -> flag = 0;
+    vp -> fp = 0;
+    vp -> ip = 0;
+    vp -> length = 0;
+    vp -> offset = 0;
+    vp -> prot = 0;
+    vp -> staddr = 0;
+    vp -> used = 0;
+  }
+  return;
+} 
+
+
 // Exit the current process.  Does not return.
 // An exited process remains in the zombie state
 // until its parent calls wait().
@@ -341,9 +399,18 @@ exit(int status)
 {
   struct proc *p = myproc();
 
+  printf("into exit\n");
   if(p == initproc)
     panic("init exiting");
 
+  struct VMA *vp;
+  for(int i = 0; i < VMANUM; ++i) { 
+    vp = &(p -> vma[i]);
+    if(vp -> used) { 
+      freeMmap(vp);
+    } 
+  } 
+  
   // Close all open files.
   for(int fd = 0; fd < NOFILE; fd++){
     if(p->ofile[fd]){
@@ -374,6 +441,7 @@ exit(int status)
   release(&wait_lock);
 
   // Jump into the scheduler, never to return.
+  printf("In exit, b4 sched\n");
   sched();
   panic("zombie exit");
 }

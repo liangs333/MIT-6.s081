@@ -229,6 +229,7 @@ mmap_test(void)
 
   if(memcmp(p1, "12345", 5) != 0)
     err("mmap1 mismatch");
+  printf("READY TO GETIN\n");
   if(memcmp(p2, "67890", 5) != 0)
     err("mmap2 mismatch");
 
@@ -274,9 +275,13 @@ fork_test(void)
 
   if((pid = fork()) < 0)
     err("fork");
+  printf("fork seems alive\n");
   if (pid == 0) {
+    printf("fork good\n");
     _v1(p1);
+    printf("check page good\n");
     munmap(p1, PGSIZE); // just the first page
+    printf("mumpap good\n");
     exit(0); // tell the parent that the mapping looks OK.
   }
 

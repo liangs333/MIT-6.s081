@@ -5,6 +5,7 @@
 #include "spinlock.h"
 #include "proc.h"
 #include "defs.h"
+#include "fcntl.h"
 
 struct spinlock tickslock;
 uint ticks;
@@ -65,9 +66,78 @@ usertrap(void)
     intr_on();
 
     syscall();
-  } else if((which_dev = devintr()) != 0){
+  } 
+  else if((which_dev = devintr()) != 0){
     // ok
-  } else {
+  } 
+  else if(r_scause() == 13 || r_scause() == 15) {
+    uint64 va = r_stval();
+    if(va >= MAXVA || va >= p->sz || va < p -> trapframe -> sp)
+      p -> killed = 1;
+    else { 
+      struct VMA *vp;
+      for(int i = 0; i < VMANUM; ++i) { 
+        vp = &(p -> vma[i]);
+        if(!vp -> used) {
+          vp = 0;
+          continue;
+        }
+        
+        if(va >= vp -> staddr && va < (vp -> staddr + vp -> length)) { 
+          //[ )
+          break;
+        } 
+        else { 
+          vp = 0;
+        } 
+      } 
+
+      if(!vp) {
+        //没找着就把proc做掉
+        p -> killed = 1;
+      }
+      else { 
+        //readi(struct inode *ip, int user_dst, uint64 dst, uint off, uint n)
+        uint64 mem = (uint64)kalloc();
+        if(mem == 0) { 
+          p -> killed = 1;
+        } 
+        else { //河狸分配
+          memset((void *)mem, 0, PGSIZE);
+          ilock(vp -> ip);
+//          printf("OFFSET = %d\n", va - vp -> staddr);
+//          printf("vp = %d\n", vp - p -> vma);
+          if(readi(vp -> ip, 0, mem, (va - vp -> staddr), PGSIZE) == -1)
+            p -> killed = 1;
+          else {
+            // char *pppp = (char *)mem;
+            // for(int i = 0; i < PGSIZE; ++i) {
+            //   printf("%x ", *pppp);
+            //   pppp++;
+            // }
+            // printf("\n");
+          }
+          iunlock(vp -> ip);
+          if(!(p -> killed)) { 
+            uint64 flags = PTE_U;
+
+            if(vp -> prot & PROT_READ)
+              flags |= PTE_R;
+            if(vp -> prot & PROT_EXEC)
+              flags |= PTE_X;
+            if(vp -> prot & PROT_WRITE)
+              flags |= PTE_W;
+            //mappages(pagetable_t pagetable, uint64 va, uint64 size, uint64 pa, int perm)
+            if(mappages(p -> pagetable, va, PGSIZE, mem, flags) == -1) {
+              kfree((void *)mem);
+              p -> killed = 1;
+            }
+          } 
+        } 
+      } 
+    } 
+  } 
+  else {
     printf("usertrap(): unexpected scause %p pid=%d\n", r_scause(), p->pid);
     printf("            sepc=%p stval=%p\n", r_sepc(), r_stval());
     p->killed = 1;

@@ -484,3 +484,147 @@ sys_pipe(void)
   }
   return 0;
 }
+
+struct VMA *getVMA() { 
+  struct proc *p = myproc();
+  struct VMA *vp = 0;
+  for(int i = 0; i < VMANUM; ++i) { 
+    vp = &(p -> vma[i]);
+    if(vp -> used)
+      continue;
+    else 
+      break;
+  } 
+  if(vp -> used == 0)
+    return vp;
+  else 
+    return 0;
+} 
+
+//void* mmap(void* addr, uint64 length, int prot, int flags, int fd, uint64 offset);
+
+uint64 sys_mmap() {
+  uint64 failed = 0xffffffffffffffff;
+  uint64 addr = failed;
+  struct VMA *vp = getVMA();
+  struct proc *p = myproc();
+  int prot, flags, fd;
+  uint64 length;
+  if(vp == 0)
+    return failed;
+  if(argaddr(1, &length) < 0)
+    return failed;
+  if(argint(2, &prot) < 0)
+    return failed;
+  if(argint(3, &flags) < 0)
+    return failed;
+  if(argint(4, &fd) < 0)
+    return failed;
+  length = PGROUNDUP(length);
+  if(p -> sz + length >= MAXVA)
+    return failed;
+
+  //check一下写文件的权限对不对
+  if(p -> ofile[fd] -> writable == 0 && (prot & PROT_WRITE) && (flags & MAP_SHARED))
+    return failed;
+  
+  //check一下读文件的权限对不对
+  if(p -> ofile[fd] -> readable == 0)
+    return failed;
+
+  vp -> prot = prot;
+  vp -> flag = flags;
+  addr = (vp -> staddr = PGROUNDUP(p -> sz));
+  vp -> edaddr = PGROUNDUP(p -> sz + length);// [ )
+  vp -> length = length;
+  vp -> used = 1;
+  vp -> fp = p -> ofile[fd];
+  vp -> ip = p -> ofile[fd] -> ip;
+  vp -> offset = 0;
+  //虽然传不进来，但是后面要用。
+
+  p -> sz += PGROUNDUP(length);
+  //注意一定一定一定要整页搞
+
+  filedup(vp -> fp);
+  //warning warning 
+
+
+  printf("mmap fd %d to VMA %d\n", fd, vp - (p -> vma));
+  printf("va from %p to %p\n", vp -> edaddr, vp -> edaddr + vp -> length);
+  return addr;
+  //感觉只有p -> sz上头有可以用的连续空间
+}
+
+uint64 sys_munmap() {
+  uint64 addr, length;
+  struct VMA *vp;
+  struct proc *p = myproc();
+  if(argaddr(0, &addr) < 0)
+    return -1;
+  if(argaddr(1, &length) < 0)
+    return -1;
+  for(int i = 0; i < VMANUM; ++i) { 
+    vp = &(p -> vma[i]);
+    if(!vp -> used)
+      continue;
+    if((addr >= vp -> staddr) && (addr < vp -> staddr + vp -> length)) 
+      break;
+    else 
+      vp = 0;
+  } 
+  
+  if(vp == 0) //404 not found
+    return -1;
+  
+  //可能掐头/去尾/砍整个儿
+  if(addr == vp -> staddr) { // 掐头
+    uint64 lef = vp -> staddr, rig = vp -> staddr + length;//砍掉[ )  
+    if(rig > vp -> staddr + vp -> length) {
+      panic("overCut");
+    }
+    uint64 naddr = PGROUNDDOWN(lef);
+    if(vp -> flag & MAP_SHARED)
+      filewriteWithOffset(vp -> fp, addr, length, vp -> offset);
+    // 写文件
+    while(naddr + PGSIZE <= rig) { 
+      //这里符号感觉不是很好说有没有等于
+
+      //uvmunmap(pagetable_t pagetable, uint64 va, uint64 npages, int do_free)
+      uvmunmap(p -> pagetable, naddr, 1, 1);
+      naddr += PGSIZE;
+    } 
+    vp -> staddr = rig; // 尾巴不需要动的
+    vp -> offset += length;
+    printf("cut head success\n");
+  } 
+  else { //去尾
+    uint64 rig = addr + length;
+    if(rig != vp -> staddr + vp -> length) {
+      panic("cut tail GG");
+    }
+    if(vp -> flag & MAP_SHARED)
+      filewriteWithOffset(vp -> fp, addr, length, vp -> offset + addr - (vp -> staddr));
+    
+    //addr和length不会有问题，offset + addr - (vp -> staddr)指向了文件应该开始被覆盖的地方，应该也没啥问题。
+    uint64 naddr = PGROUNDUP(addr);
+    while(naddr + PGSIZE <= rig) { 
+      uvmunmap(p -> pagetable, naddr, 1, 1);
+      naddr += PGSIZE;
+    } 
+  } 
+  vp -> length -= length;
+  if(vp -> length == 0) { //整个儿木大了
+    fileclose(vp -> fp);
+    vp -> edaddr = 0;
+    vp -> flag = 0;
+    vp -> fp = 0;
+    vp -> ip = 0;
+    vp -> length = 0;
+    vp -> offset = 0;
+    vp -> prot = 0;
+    vp -> staddr = 0;
+    vp -> used = 0;
+  }
+  return 0;
+}

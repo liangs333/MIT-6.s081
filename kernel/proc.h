@@ -82,6 +82,8 @@ struct trapframe {
 
 enum procstate { UNUSED, USED, SLEEPING, RUNNABLE, RUNNING, ZOMBIE };
 
+#define VMANUM (20)
+
 // Per-process state
 struct proc {
   struct spinlock lock;
@@ -105,4 +107,15 @@ struct proc {
   struct file *ofile[NOFILE];  // Open files
   struct inode *cwd;           // Current directory
   char name[16];               // Process name (debugging)
+  struct VMA {
+    struct file *fp; //file pointer
+    struct inode *ip; //inode pointer
+    uint64 staddr; //start address
+    uint64 edaddr; //end address
+    uint64 length; //就是length
+    uint64 prot;  //传参1
+    uint64 flag; //传参2
+    uint64 offset; //对于文件来讲，staddr对应的offset，闭区间
+    int used; //有被占用
+  } vma[VMANUM];
 };
